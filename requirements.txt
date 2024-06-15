@@ -2,4 +2,4 @@ requests
 python-dotenv
 nltk
 pyperclip
-nio
+matrix-nio
