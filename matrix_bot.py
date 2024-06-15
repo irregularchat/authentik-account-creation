@@ -77,7 +77,7 @@ class MatrixBot:
             return
 
         try:
-            # Create a new room to message the user
+            # Create a new room to message the user using their Matrix ID
             response = await self.client.room_create(
                 invite=[username],
                 name="Welcome Room",
