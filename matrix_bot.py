@@ -116,12 +116,13 @@ class MatrixBot:
         for room_id in self.room_ids:
             await self.join_room(room_id)
 
-        self.client.add_event_callback(on_message, RoomMessageText)
+        self.client.add_event_callback(self.on_message, RoomMessageText)
 
         await self.client.sync_forever(timeout=30000, full_state=True)
 
-async def on_message(room, event):
-    await bot.invite_new_user(room.room_id, event)
+    async def on_message(self, room, event):
+        logging.info(f"Received message from {event.sender} in room {room.room_id}")
+        await self.invite_new_user(room.room_id, event)
 
 async def run_bot():
     global bot
