@@ -1,5 +1,6 @@
 import os
 import asyncio
+import subprocess
 from dotenv import load_dotenv
 from nio import AsyncClient, RoomMessageText, RoomCreateError
 
@@ -46,13 +47,28 @@ class MatrixBot:
             new_username = username.split(":")[0].split("_")[1]
 
         print(f"Creating new user with username: {new_username}")
-        new_password = generate_password()
 
         # Create user using the existing authentik-creation-workflow.py functionality
-        create_user_result = os.system(f"python3 authentik-creation-workflow.py create {new_username}")
+        create_user_result = subprocess.run(
+            ["python3", "authentik-creation-workflow.py", "create", new_username],
+            capture_output=True,
+            text=True
+        )
 
-        if create_user_result != 0:
-            print(f"Failed to create user {new_username}")
+        if create_user_result.returncode != 0:
+            print(f"Failed to create user {new_username}: {create_user_result.stderr}")
+            return
+
+        # Parse the output to get the new password
+        output_lines = create_user_result.stdout.splitlines()
+        new_password = None
+        for line in output_lines:
+            if line.startswith("Temp PASSWORD:"):
+                new_password = line.split("Temp PASSWORD:")[1].strip()
+                break
+
+        if not new_password:
+            print(f"Failed to retrieve password for user {new_username}")
             return
 
         try:
@@ -96,7 +112,7 @@ class MatrixBot:
             await self.join_room(room_id)
 
         @self.client.event_callback(RoomMessageText)
-        async def on_message(room: Room, event: RoomMessageText):
+        async def on_message(room, event):
             await self.invite_new_user(room.room_id, event)
 
         await self.client.sync_forever(timeout=30000, full_state=True)
