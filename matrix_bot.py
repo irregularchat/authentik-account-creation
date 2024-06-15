@@ -51,7 +51,7 @@ class MatrixBot:
         else:
             base_username = username.split(":")[0].split("_")[1]
 
-        base_username += "-sgl"
+        base_username += "-testing"
         new_username = base_username
 
         logging.info(f"Creating new user with username: {new_username}")
@@ -62,7 +62,8 @@ class MatrixBot:
             create_user_result = subprocess.run(
                 ["python3", "authentik-creation-workflow.py", "create", new_username],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=60  # Set timeout to avoid indefinite blocking
             )
 
             if create_user_result.returncode == 0:
@@ -134,6 +135,9 @@ class MatrixBot:
         await self.client.sync_forever(timeout=30000, full_state=True)
 
     async def on_message(self, room, event):
+        if room.room_id not in self.room_ids:
+            return  # Ignore messages from rooms not in the monitored list
+
         logging.info(f"Received message from {event.sender} in room {room.room_id}")
         await self.invite_new_user(room.room_id, event)
 
