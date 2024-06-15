@@ -1,8 +1,12 @@
 import os
 import asyncio
 import subprocess
+import logging
 from dotenv import load_dotenv
 from nio import AsyncClient, RoomMessageText, RoomCreateError
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
 # Load environment variables from .env file
 load_dotenv()
@@ -29,9 +33,9 @@ class MatrixBot:
     async def join_room(self, room_id):
         try:
             await self.client.join(room_id)
-            print(f"Joined room {room_id}")
+            logging.info(f"Joined room {room_id}")
         except Exception as e:
-            print(f"Failed to join room {room_id}: {e}")
+            logging.error(f"Failed to join room {room_id}: {e}")
 
     async def invite_new_user(self, room_id, event):
         if event.sender == self.client.user_id:
@@ -47,7 +51,7 @@ class MatrixBot:
         else:
             new_username = username.split(":")[0].split("_")[1]
 
-        print(f"Creating new user with username: {new_username}")
+        logging.info(f"Creating new user with username: {new_username}")
 
         # Create user using the existing authentik-creation-workflow.py functionality
         create_user_result = subprocess.run(
@@ -57,7 +61,7 @@ class MatrixBot:
         )
 
         if create_user_result.returncode != 0:
-            print(f"Failed to create user {new_username}: {create_user_result.stderr}")
+            logging.error(f"Failed to create user {new_username}: {create_user_result.stderr}")
             return
 
         # Parse the output to get the new password
@@ -69,7 +73,7 @@ class MatrixBot:
                 break
 
         if not new_password:
-            print(f"Failed to retrieve password for user {new_username}")
+            logging.error(f"Failed to retrieve password for user {new_username}")
             return
 
         try:
@@ -96,16 +100,16 @@ class MatrixBot:
                 message_type="m.room.message",
                 content={"msgtype": "m.text", "body": welcome_message}
             )
-            print(f"Sent welcome message to {username} in room {welcome_room_id}")
+            logging.info(f"Sent welcome message to {username} in room {welcome_room_id}")
         except RoomCreateError as e:
-            print(f"Failed to create room to message user: {e}")
+            logging.error(f"Failed to create room to message user: {e}")
 
     async def get_display_name(self, user_id):
         try:
             response = await self.client.get_displayname(user_id)
             return response.displayname
         except Exception as e:
-            print(f"Failed to get display name for user {user_id}: {e}")
+            logging.error(f"Failed to get display name for user {user_id}: {e}")
             return None
 
     async def main(self):
@@ -130,7 +134,7 @@ async def run_bot():
         try:
             await bot.main()
         except Exception as e:
-            print(f"Bot encountered an error: {e}. Restarting...")
+            logging.error(f"Bot encountered an error: {e}. Restarting...")
             await bot.client.close()
             await asyncio.sleep(5)  # Wait for a few seconds before restarting
 
