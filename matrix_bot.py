@@ -23,7 +23,8 @@ class MatrixBot:
         self.homeserver = homeserver
         self.access_token = access_token
         self.room_ids = room_ids
-        self.client = AsyncClient(homeserver, access_token=access_token)
+        self.client = AsyncClient(homeserver)
+        self.client.access_token = access_token
 
     async def join_room(self, room_id):
         try:
@@ -131,4 +132,4 @@ async def run_bot():
             await asyncio.sleep(5)  # Wait for a few seconds before restarting
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(run_bot())
+    asyncio.run(run_bot())
