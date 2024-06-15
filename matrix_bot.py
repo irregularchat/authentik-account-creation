@@ -47,37 +47,48 @@ class MatrixBot:
             username_parts = display_name.split()
             first_name = username_parts[0]
             last_initial = username_parts[1][0] if len(username_parts) > 1 else ''
-            new_username = f"{first_name.lower()}-{last_initial.lower()}-sgl" if last_initial else f"{first_name.lower()}-sgl"
+            base_username = f"{first_name.lower()}-{last_initial.lower()}" if last_initial else first_name.lower()
         else:
-            new_username = username.split(":")[0].split("_")[1]
+            base_username = username.split(":")[0].split("_")[1]
+
+        base_username += "-sgl"
+        new_username = base_username
 
         logging.info(f"Creating new user with username: {new_username}")
 
-        # Create user using the existing authentik-creation-workflow.py functionality
-        create_user_result = subprocess.run(
-            ["python3", "authentik-creation-workflow.py", "create", new_username],
-            capture_output=True,
-            text=True
-        )
+        # Attempt to create user, modify username if it already exists
+        suffix = 1
+        while True:
+            create_user_result = subprocess.run(
+                ["python3", "authentik-creation-workflow.py", "create", new_username],
+                capture_output=True,
+                text=True
+            )
 
-        if create_user_result.returncode != 0:
-            logging.error(f"Failed to create user {new_username}: {create_user_result.stderr}")
-            return
+            if create_user_result.returncode == 0:
+                break
+            elif "already taken" in create_user_result.stderr:
+                new_username = f"{base_username}{suffix}"
+                suffix += 1
+                logging.info(f"Username {new_username} already exists. Trying with username: {new_username}")
+            else:
+                logging.error(f"Failed to create user {new_username}: {create_user_result.stderr}")
+                return
 
-        # Parse the output to get the new password
         # Parse the output to get the new password
         output_lines = create_user_result.stdout.splitlines()
         new_password = None
         for line in output_lines:
-            logging.info(f"Output line: {line}")
-            if "Temp PASSWORD:" in line:
+            if line.startswith("Temp PASSWORD:"):
                 new_password = line.split("Temp PASSWORD:")[1].strip()
                 break
 
         if not new_password:
             logging.error(f"Failed to retrieve password for user {new_username}")
             return
+
         logging.info(f"Retrieved password for user {new_username}: {new_password}")
+
         try:
             # Create a new room to message the user using their Matrix ID
             response = await self.client.room_create(
