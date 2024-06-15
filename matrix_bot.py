@@ -47,7 +47,7 @@ class MatrixBot:
             username_parts = display_name.split()
             first_name = username_parts[0]
             last_initial = username_parts[1][0] if len(username_parts) > 1 else ''
-            new_username = f"{first_name.lower()}-{last_initial.lower()}" if last_initial else first_name.lower()
+            new_username = f"{first_name.lower()}-{last_initial.lower()}-sgl" if last_initial else f"{first_name.lower()}-sgl"
         else:
             new_username = username.split(":")[0].split("_")[1]
 
@@ -65,17 +65,19 @@ class MatrixBot:
             return
 
         # Parse the output to get the new password
+        # Parse the output to get the new password
         output_lines = create_user_result.stdout.splitlines()
         new_password = None
         for line in output_lines:
-            if line.startswith("Temp PASSWORD:"):
+            logging.info(f"Output line: {line}")
+            if "Temp PASSWORD:" in line:
                 new_password = line.split("Temp PASSWORD:")[1].strip()
                 break
 
         if not new_password:
             logging.error(f"Failed to retrieve password for user {new_username}")
             return
-
+        logging.info(f"Retrieved password for user {new_username}: {new_password}")
         try:
             # Create a new room to message the user using their Matrix ID
             response = await self.client.room_create(
