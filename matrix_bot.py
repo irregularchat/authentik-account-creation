@@ -112,13 +112,15 @@ class MatrixBot:
         for room_id in self.room_ids:
             await self.join_room(room_id)
 
-        @self.client.event_callback(RoomMessageText)
-        async def on_message(room, event):
-            await self.invite_new_user(room.room_id, event)
+        self.client.add_event_callback(on_message, RoomMessageText)
 
         await self.client.sync_forever(timeout=30000, full_state=True)
 
+async def on_message(room, event):
+    await bot.invite_new_user(room.room_id, event)
+
 async def run_bot():
+    global bot
     bot = MatrixBot(
         homeserver=homeserver,
         access_token=access_token,
@@ -129,6 +131,7 @@ async def run_bot():
             await bot.main()
         except Exception as e:
             print(f"Bot encountered an error: {e}. Restarting...")
+            await bot.client.close()
             await asyncio.sleep(5)  # Wait for a few seconds before restarting
 
 if __name__ == "__main__":
