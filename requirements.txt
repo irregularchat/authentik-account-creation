@@ -3,3 +3,4 @@ python-dotenv
 nltk
 pyperclip
 streamlit
+streamlit-auth0
