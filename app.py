@@ -1,5 +1,8 @@
+import os
+import hashlib
+import base64
 import streamlit as st
-from modules.load_env import load_environment_variables
+from dotenv import load_dotenv
 from modules.ui import display_ui
 from modules.authentik import AuthentikAPI
 from modules.shlink import shorten_url
@@ -19,18 +22,36 @@ from datetime import datetime, timedelta
 from pytz import timezone
 import pandas as pd
 
-# Load environment variables
-env_vars = load_environment_variables()
+# Load environment variables directly in app.py
+load_dotenv()
+
+# Define variables using environment variables
+PAGE_TITLE = os.getenv("PAGE_TITLE")
+FAVICON_URL = os.getenv("FAVICON_URL")
+AUTHENTIK_API_TOKEN = os.getenv("AUTHENTIK_API_TOKEN")
+MAIN_GROUP_ID = os.getenv("MAIN_GROUP_ID")
+BASE_DOMAIN = os.getenv("BASE_DOMAIN")
+FLOW_ID = os.getenv("FLOW_ID")
+SHLINK_API_TOKEN = os.getenv("SHLINK_API_TOKEN")
+SHLINK_URL = os.getenv("SHLINK_URL")
+AUTHENTIK_API_URL = os.getenv("AUTHENTIK_API_URL")
+LOCAL_DB = os.getenv("LOCAL_DB", "users.csv")
+ENCRYPTION_PASSWORD = os.getenv("ENCRYPTION_PASSWORD")
+
+# Generate the encryption key
+ENCRYPTION_KEY = base64.urlsafe_b64encode(hashlib.sha256(ENCRYPTION_PASSWORD.encode()).digest())
 
 # Define the Eastern Time zone
 eastern = timezone('US/Eastern')
 current_time_eastern = datetime.now(eastern)
-st.set_page_config(page_title=env_vars["PAGE_TITLE"], page_icon=env_vars["FAVICON_URL"])
-st.title(env_vars["PAGE_TITLE"])
+
+# Set up Streamlit app configuration
+st.set_page_config(page_title=PAGE_TITLE, page_icon=FAVICON_URL)
+st.title(PAGE_TITLE)
 
 # Initialize the AuthentikAPI instance
-authentik_api = AuthentikAPI(env_vars["AUTHENTIK_API_URL"], {
-    "Authorization": f"Bearer {env_vars['AUTHENTIK_API_TOKEN']}",
+authentik_api = AuthentikAPI(AUTHENTIK_API_URL, {
+    "Authorization": f"Bearer {AUTHENTIK_API_TOKEN}",
     "Content-Type": "application/json"
 })
 
@@ -44,10 +65,6 @@ operation = st.selectbox("Select Operation", [
     "Create Invite",
     "List Users"
 ])
-
-# Local database and encryption key from environment variables
-local_db = env_vars["LOCAL_DB"]
-encryption_key = env_vars["ENCRYPTION_KEY"]
 
 if operation == "Create User":
     first_name = st.text_input("Enter First Name")
@@ -70,8 +87,8 @@ if operation == "Create User":
     if st.button("Submit"):
         try:
             # Update local database and check for existing user
-            update_local_db(authentik_api, local_db, encryption_key)
-            user_exists = search_local_db(username_input, local_db, encryption_key)
+            update_local_db(authentik_api, LOCAL_DB, ENCRYPTION_KEY)
+            user_exists = search_local_db(username_input, LOCAL_DB, ENCRYPTION_KEY)
             if not user_exists.empty:
                 st.warning(f"User {username_input} already exists. Trying to create a unique username.")
                 existing_usernames = get_existing_usernames(authentik_api)
@@ -79,15 +96,15 @@ if operation == "Create User":
             else:
                 new_username = username_input
             
-            email = email_input if email_input else f"{new_username}@{env_vars['BASE_DOMAIN']}"
+            email = email_input if email_input else f"{new_username}@{BASE_DOMAIN}"
             full_name = f"{first_name.strip()} {last_name.strip()}"
-            new_user_id = create_user(authentik_api, new_username, email, full_name, env_vars["MAIN_GROUP_ID"])
+            new_user_id = create_user(authentik_api, new_username, email, full_name, MAIN_GROUP_ID)
             
             if new_user_id is None:
                 st.warning(f"Username {new_username} might already exist. Please try again.")
             else:
                 # Generate and shorten the setup link
-                setup_link = f"https://{env_vars['BASE_DOMAIN']}/setup/{new_username}"
+                setup_link = f"https://{BASE_DOMAIN}/setup/{new_username}"
                 setup_link = shorten_url(setup_link, 'setup', f"{new_username}")
                                 
                 welcome_message = f"""
@@ -106,7 +123,7 @@ if operation == "Create User":
                 """
                 st.code(welcome_message, language='markdown')
                 st.session_state['message'] = welcome_message
-                update_local_db(authentik_api, local_db, encryption_key)
+                update_local_db(authentik_api, LOCAL_DB, ENCRYPTION_KEY)
                 st.session_state['user_list'] = None  # Clear user list if there was any
                 st.success("User created successfully!")
 
@@ -145,7 +162,7 @@ elif operation == "Create Invite":
             if expires_date and expires_time:
                 local_expires = datetime.combine(expires_date, expires_time)
                 expires = local_expires.isoformat()
-            invite_link, invite_expires = create_invite(authentik_api, name_input, env_vars["FLOW_ID"], expires)
+            invite_link, invite_expires = create_invite(authentik_api, name_input, FLOW_ID, expires)
 
             if invite_expires:
                 invite_expires_time = datetime.fromisoformat(invite_expires.replace('Z', '+00:00')).astimezone(timezone('US/Eastern')) - datetime.now(timezone('US/Eastern'))
