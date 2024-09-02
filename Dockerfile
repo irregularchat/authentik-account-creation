@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Command to run the Streamlit app using a shell to handle environment variable substitution
-CMD ["sh", "-c", "streamlit run authentik-streamlit.py --server.port=${PORT} --server.enableCORS=false"]
+CMD ["sh", "-c", "streamlit run app.py --server.port=${PORT} --server.enableCORS=false"]
