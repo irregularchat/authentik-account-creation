@@ -1,5 +1,7 @@
+# api.py
 import requests
 import logging
+from config.settings import AUTHENTIK_API_URL, FLOW_ID
 
 # Function to create a new user
 def create_user(api_url, token, username, email, name, group_id, intro=None, invited_by=None):
@@ -70,37 +72,45 @@ def get_user_id_by_username(api_url, token, username):
 
 
 # Function to create an invite
-def create_invite(api_url, token, flow_id, label, expires=None):
-    headers = {"Authorization": f"Bearer {token}"}
+# In app/auth/api.py
+def create_invite(headers, label, expires=None):
+    """
+    Create an invitation for a user.
+    """
+    eastern = timezone('US/Eastern')
+    current_time_str = datetime.now(eastern).strftime('%H-%M')
+
+    if not label:
+        label = current_time_str
+
+    if expires is None:
+        expires = (datetime.now(eastern) + timedelta(hours=2)).isoformat()
+
     data = {
         "name": label,
         "expires": expires,
         "fixed_data": {},
         "single_use": True,
-        "flow": flow_id
+        "flow": FLOW_ID
     }
     
-    # Authentik API invitation endpoint
-    invite_api_url = f"{api_url}/stages/invitation/invitations/"
-    
+    invite_api_url = f"{AUTHENTIK_API_URL}/stages/invitation/invitations/"
+
     try:
         response = requests.post(invite_api_url, headers=headers, json=data)
         response.raise_for_status()
         response_data = response.json()
 
-        # Get the invite ID and construct the full URL
         invite_id = response_data.get('pk')
         if not invite_id:
             raise ValueError("API response missing 'pk' field.")
-        
-        return invite_id
-    except requests.exceptions.HTTPError as http_err:
-        logging.error(f"HTTP error occurred: {http_err}")
-        logging.info("API Response: %s", response.json())
-        return None
+
+        invite_link = f"https://sso.{BASE_DOMAIN}/if/flow/simple-enrollment-flow/?itoken={invite_id}"
+        short_invite_link = shorten_url(invite_link, 'invite', label)
+        return short_invite_link, expires
     except Exception as err:
-        logging.error(f"An error occurred: {err}")
-        return None
+        logging.error(f"Error creating invite: {err}")
+        return None, None
 
 
 # Function to update a user's status (activate/deactivate)

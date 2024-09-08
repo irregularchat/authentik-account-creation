@@ -1,3 +1,4 @@
+# main.py
 import streamlit as st
 from ui.home import render_home_page
 from config.settings import AUTHENTIK_API_TOKEN, MAIN_GROUP_ID
