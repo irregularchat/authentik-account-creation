@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 from pytz import timezone
-import requests
 
 def create_unique_username(base_username, existing_usernames):
     """
@@ -30,27 +29,8 @@ def get_existing_usernames(authentik_api):
     Returns:
         set: A set of all existing usernames.
     """
-    users = list_users(authentik_api)
+    users = authentik_api.list_users()
     return {user['username'] for user in users}
-
-def list_users(authentik_api, search_term=None):
-    """
-    List all users or search for users by a search term.
-
-    Parameters:
-        authentik_api (AuthentikAPI): An instance of the AuthentikAPI class.
-        search_term (str, optional): A term to search users by. Defaults to None.
-
-    Returns:
-        list: A list of users matching the search term.
-    """
-    url = f"{authentik_api.api_url}/core/users/"
-    if search_term:
-        url += f"?search={search_term}"
-    
-    response = requests.get(url, headers=authentik_api.headers)
-    response.raise_for_status()
-    return response.json().get('results', [])
 
 def create_user(authentik_api, username, email, name, group_id):
     """

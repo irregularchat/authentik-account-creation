@@ -13,12 +13,12 @@ from modules.user_management import (
     create_invite,
     get_existing_usernames,
     create_unique_username,
-    list_users,
     update_user_status,
     delete_user,
     reset_user_password,
 )
-from datetime import datetime, timedelta
+
+# Note: `list_users` is part of the `AuthentikAPI` class, so it's not imported from `user_management.py`.from datetime import datetime, timedelta
 from pytz import timezone
 import pandas as pd
 
