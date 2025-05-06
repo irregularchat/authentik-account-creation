@@ -1,15 +1,45 @@
 services:
-  streamlit-app:
+  streamlit:
     build: .
     ports:
-      - "${PORT}:${PORT}"
+      - "8501:8503"  # Map host port 8501 to container port 8503
     environment:
-      - AUTHENTIK_API_TOKEN=${AUTHENTIK_API_TOKEN}
-      - MAIN_GROUP_ID=${MAIN_GROUP_ID}
-      - BASE_DOMAIN=${BASE_DOMAIN}
-      - PORT=${PORT}
+      - PYTHONUNBUFFERED=1  # Enable unbuffered output
+      - IN_DOCKER=true      # Indicate we're running in Docker
+      - DB_HOST=db          # Explicitly set database host
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PORT=5432
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - ./app:/app/app
-    env_file:
-      - .env
+      - .:/app
+      - ./data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8503"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    ports:
+      - "5436:5432"  # Map host port 5436 to container port 5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

@@ -1,7 +1,7 @@
 requests
 python-dotenv
 nltk
-streamlit
+streamlit>=1.31.0
 pandas
 streamlit-copy-to-clipboard
 cryptography
@@ -11,3 +11,12 @@ xkcdpass
 # streamlit-annotated-text
 # streamlit-easy-button
 thorn
+psycopg2-binary
+sqlalchemy
+alembic
+openai
+email-validator
+matrix-nio
+nest-asyncio
+streamlit-extras
+streamlit-option-menu

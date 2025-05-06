@@ -1,7 +1,27 @@
-# Authentik User Creation Script
+# Chat Based Community Dashboard
 
-This application brings authentik admin actions in a controled and dedicated manner for your community moderators. The application uses environment variables for secure handling of sensitive information. The application runs with streamlit and can be deployed on a server for easy access by the community moderators. No Authentication is built into the application, so it is important to secure the server where the application is deployed; this app has been tested with an identity aware proxy like cloudlfare access.
+## About
+See [forum post about this fork](https://forum.irregularchat.com/t/forking-authentik-distro-for-better-community-management/647?u=sac) for more information.
 
+While platforms like Discord and Slack are great for general communities, and tools like Matrix/Element Messenger offer self-hosting and encryption, many users are hesitant to adopt new platforms. Signal's wide adoption and default status make it an ideal starting point for community interaction.
+
+This repo bridges the gap by providing community management tools that extend Signal's capabilities, along with integration options like:
+
+Signal Bots: Enable interaction and updates directly through Signal.
+Maubot for Matrix: Allow easy management and messaging in Matrix ecosystems.
+Bridged Chats: Seamlessly connect chats across platforms.
+SMTP Emails: Enable email-based communications for users.
+Webhooks: Automate and streamline tasks.
+NoCoDB Database Integration: Simplify community data handling and tracking.
+### Aims
+
+This project aims to retain Signal as a base platform while expanding its usability for community managers. With additional tools and integrations, this repo provides options for:
+
+Enhanced Signal bot functionality.
+Bridging chats across different platforms.
+Managing community databases and communication through an accessible GUI.
+
+### Features 
 The application has the following features:
 - Create a new user account, generating a custom message for the user
 - Reset the password for an existing user account
@@ -13,6 +33,8 @@ The application has the following features:
    - Changing password
    - Deleting
 
+### Roadmap
+See [ROADMAP.md](ROADMAP.md) for more information.
 
 ## Prerequisites
 
@@ -57,6 +79,36 @@ The application has the following features:
 1. **Access the Application**
    - Open a web browser and navigate to `http://localhost:8501` to access the application.
 
+### Running Without Docker
+To run the application directly on your local machine without Docker, you have two options:
+
+#### Option 1: Local PostgreSQL
+1. **Ensure PostgreSQL is installed** on your local machine
+2. **Create a database** with the credentials specified in your `.env` file:
+   ```bash
+   createdb -U dashboarduser dashboarddb
+   ```
+3. **Run the local development script**:
+   ```bash
+   ./run_local.sh
+   ```
+   This script will:
+   - Configure the application to connect to PostgreSQL on localhost
+   - Check if PostgreSQL is running
+   - Start the Streamlit application
+
+#### Option 2: SQLite (Simplest)
+If you don't want to install PostgreSQL, you can use SQLite:
+1. **Run the SQLite development script**:
+   ```bash
+   ./run_sqlite.sh
+   ```
+   This script will:
+   - Configure the application to use a SQLite database file (local_dev.db)
+   - Start the Streamlit application
+
+Note: Some features that rely on PostgreSQL-specific functionality may not work correctly in SQLite mode.
+
 ### Production Deployment
 1. **Setup Cloudflared Tunnel**
 2. **Serve Application**
@@ -74,4 +126,5 @@ The application has the following features:
 
 ## Contributing
 
-Contributions are welcome! Please fork the repository and submit a pull request.
+Contributions are welcome! 
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
