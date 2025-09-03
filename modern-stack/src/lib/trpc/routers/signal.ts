@@ -1,8 +1,24 @@
 import { z } from 'zod';
-import { createTRPCRouter, moderatorProcedure } from '../trpc';
+import { createTRPCRouter, moderatorProcedure, protectedProcedure } from '../trpc';
 import { TRPCError } from '@trpc/server';
 import { enhancedSignalClient } from '@/lib/signal/enhanced-api-client';
 import { logCommunityEvent, getCategoryForEventType } from '@/lib/community-timeline';
+import { NativeSignalBotService } from '@/lib/signal-cli/native-daemon-service';
+
+let nativeBot: NativeSignalBotService | null = null;
+
+function getNativeBot() {
+  if (!nativeBot) {
+    const config = {
+      phoneNumber: process.env.SIGNAL_PHONE_NUMBER || process.env.SIGNAL_BOT_PHONE_NUMBER,
+      aiEnabled: process.env.OPENAI_ACTIVE === 'true',
+      openAiApiKey: process.env.OPENAI_API_KEY,
+      dataDir: process.env.SIGNAL_CLI_DATA_DIR || './signal-data'
+    };
+    nativeBot = new NativeSignalBotService(config);
+  }
+  return nativeBot;
+}
 
 export const signalRouter = createTRPCRouter({
   // Get Signal groups with enhanced display names
@@ -160,6 +176,110 @@ export const signalRouter = createTRPCRouter({
       phoneNumber,
       isConfigured: !!phoneNumber,
     };
+  }),
+
+  // Native bot procedures (new approach)
+  startNativeBot: moderatorProcedure.mutation(async ({ ctx }) => {
+    try {
+      const bot = getNativeBot();
+      await bot.startListening();
+      
+      await ctx.prisma.adminEvent.create({
+        data: {
+          eventType: 'signal_bot_start',
+          username: ctx.session.user.username || 'unknown',
+          details: 'Started native Signal CLI bot daemon',
+        },
+      });
+      
+      return { success: true, message: 'Native Signal bot started successfully' };
+    } catch (error) {
+      console.error('Error starting native bot:', error);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: error instanceof Error ? error.message : 'Failed to start native bot'
+      });
+    }
+  }),
+
+  stopNativeBot: moderatorProcedure.mutation(async ({ ctx }) => {
+    try {
+      const bot = getNativeBot();
+      await bot.stopListening();
+      
+      await ctx.prisma.adminEvent.create({
+        data: {
+          eventType: 'signal_bot_stop',
+          username: ctx.session.user.username || 'unknown',
+          details: 'Stopped native Signal CLI bot daemon',
+        },
+      });
+      
+      return { success: true, message: 'Native Signal bot stopped successfully' };
+    } catch (error) {
+      console.error('Error stopping native bot:', error);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: error instanceof Error ? error.message : 'Failed to stop native bot'
+      });
+    }
+  }),
+
+  getNativeBotHealth: moderatorProcedure.query(async () => {
+    try {
+      const bot = getNativeBot();
+      return await bot.getHealth();
+    } catch (error) {
+      return {
+        status: 'unhealthy',
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }),
+
+  registerNativeAccount: moderatorProcedure
+    .input(z.object({
+      phoneNumber: z.string(),
+      captcha: z.string()
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        const bot = getNativeBot();
+        return await bot.registerAccount(input.captcha);
+      } catch (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Registration failed'
+        });
+      }
+    }),
+
+  verifyNativeAccount: moderatorProcedure
+    .input(z.object({
+      verificationCode: z.string()
+    }))
+    .mutation(async ({ input }) => {
+      try {
+        const bot = getNativeBot();
+        return await bot.verifyAccount(input.verificationCode);
+      } catch (error) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: error instanceof Error ? error.message : 'Verification failed'
+        });
+      }
+    }),
+
+  getNativeGroups: moderatorProcedure.query(async () => {
+    try {
+      const bot = getNativeBot();
+      return await bot.getGroups();
+    } catch (error) {
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: error instanceof Error ? error.message : 'Failed to get groups'
+      });
+    }
   }),
 
   // Get health status (alias for getServiceStatus for backward compatibility)  
@@ -778,6 +898,397 @@ export const signalRouter = createTRPCRouter({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Failed to deny join request'
+        });
+      }
+    }),
+
+  // ============================================================================
+  // Phase 1: Signal Group Discovery & Status APIs (v0.4.0)
+  // ============================================================================
+
+  // Get user's current Signal status and memberships
+  getMySignalStatus: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      const userId = parseInt(ctx.session.user.id);
+      
+      // Get user's Signal verification status
+      const signalIdentity = ctx.session.user.signalIdentity;
+      const phoneNumber = ctx.session.user.attributes && typeof ctx.session.user.attributes === 'object'
+        ? (ctx.session.user.attributes as any).phone_number
+        : null;
+
+      // Get user's current group memberships
+      const memberships = await ctx.prisma.signalGroupMembership.findMany({
+        where: { 
+          userId,
+          status: 'active'
+        },
+        include: {
+          group: true // This will include SignalGroup data if it exists
+        },
+        orderBy: { joinedAt: 'desc' }
+      });
+
+      // Get verified Signal groups from the cache (for enhanced names)
+      const groupIds = memberships.map(m => m.groupId);
+      const cachedGroups = await ctx.prisma.signalGroup.findMany({
+        where: { id: { in: groupIds } }
+      });
+      const groupMap = new Map(cachedGroups.map(g => [g.id, g]));
+
+      // Enhance memberships with cached group data
+      const enhancedMemberships = memberships.map(membership => {
+        const cachedGroup = groupMap.get(membership.groupId);
+        return {
+          id: membership.id,
+          groupId: membership.groupId,
+          groupName: cachedGroup?.name || membership.groupName || 'Unknown Group',
+          description: cachedGroup?.description,
+          memberCount: cachedGroup?.memberCount,
+          joinedAt: membership.joinedAt,
+          status: membership.status
+        };
+      });
+
+      return {
+        isSignalVerified: !!signalIdentity,
+        signalIdentity,
+        phoneNumber,
+        groupMemberships: enhancedMemberships,
+        totalGroups: enhancedMemberships.length
+      };
+    } catch (error) {
+      console.error('Error getting Signal status:', error);
+      throw new TRPCError({
+        code: 'INTERNAL_SERVER_ERROR',
+        message: 'Failed to get Signal status'
+      });
+    }
+  }),
+
+  // Get available Signal groups user can join
+  getAvailableSignalGroups: protectedProcedure
+    .input(z.object({
+      page: z.number().default(1),
+      limit: z.number().min(1).max(50).default(25),
+      search: z.string().optional()
+    }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const userId = parseInt(ctx.session.user.id);
+        const { page, limit, search } = input;
+        const skip = (page - 1) * limit;
+
+        // Get groups user is NOT already a member of
+        const existingMembershipGroupIds = await ctx.prisma.signalGroupMembership.findMany({
+          where: { 
+            userId,
+            status: 'active'
+          },
+          select: { groupId: true }
+        }).then(memberships => memberships.map(m => m.groupId));
+
+        // Build where clause
+        const where = {
+          isActive: true,
+          isPublic: true, // Only show public groups users can join
+          ...(existingMembershipGroupIds.length > 0 && {
+            groupId: { notIn: existingMembershipGroupIds }
+          }),
+          ...(search && {
+            OR: [
+              { groupName: { contains: search, mode: 'insensitive' as const } },
+              { description: { contains: search, mode: 'insensitive' as const } }
+            ]
+          })
+        };
+
+        // Get available groups with pagination
+        const [groups, total] = await Promise.all([
+          ctx.prisma.signalAvailableGroup.findMany({
+            where,
+            orderBy: [
+              { memberCount: 'desc' }, // Show groups with more members first
+              { groupName: 'asc' }
+            ],
+            skip,
+            take: limit
+          }),
+          ctx.prisma.signalAvailableGroup.count({ where })
+        ]);
+
+        // Enhance with cached group data for more accurate member counts
+        const groupIds = groups.map(g => g.groupId);
+        const cachedGroups = await ctx.prisma.signalGroup.findMany({
+          where: { id: { in: groupIds } }
+        });
+        const cachedGroupMap = new Map(cachedGroups.map(g => [g.id, g]));
+
+        const enhancedGroups = groups.map(group => {
+          const cachedGroup = cachedGroupMap.get(group.groupId);
+          return {
+            groupId: group.groupId,
+            groupName: cachedGroup?.name || group.groupName,
+            description: cachedGroup?.description || group.description,
+            memberCount: cachedGroup?.memberCount || group.memberCount || 0,
+            isPublic: group.isPublic,
+            requiresApproval: group.requiresApproval,
+            tags: group.tags || [],
+            lastUpdated: cachedGroup?.lastUpdated || group.updatedAt
+          };
+        });
+
+        return {
+          groups: enhancedGroups,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit)
+        };
+      } catch (error) {
+        console.error('Error getting available Signal groups:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to get available Signal groups'
+        });
+      }
+    }),
+
+  // Check specific Signal group membership status
+  checkSignalMembership: protectedProcedure
+    .input(z.object({
+      groupId: z.string()
+    }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const userId = parseInt(ctx.session.user.id);
+        
+        // Check if user is already a member
+        const membership = await ctx.prisma.signalGroupMembership.findUnique({
+          where: {
+            userId_groupId: {
+              userId,
+              groupId: input.groupId
+            }
+          }
+        });
+
+        // Check if user has a pending join request
+        const pendingRequest = await ctx.prisma.signalGroupJoinRequest.findFirst({
+          where: {
+            userId,
+            groupId: input.groupId,
+            status: 'pending'
+          }
+        });
+
+        // Get group information
+        const group = await ctx.prisma.signalAvailableGroup.findUnique({
+          where: { groupId: input.groupId }
+        });
+
+        // Get cached group data for more accurate info
+        const cachedGroup = await ctx.prisma.signalGroup.findUnique({
+          where: { id: input.groupId }
+        });
+
+        return {
+          isMember: !!membership && membership.status === 'active',
+          membershipStatus: membership?.status || null,
+          joinedAt: membership?.joinedAt || null,
+          hasPendingRequest: !!pendingRequest,
+          pendingRequestId: pendingRequest?.id || null,
+          group: group ? {
+            groupId: group.groupId,
+            groupName: cachedGroup?.name || group.groupName,
+            description: cachedGroup?.description || group.description,
+            memberCount: cachedGroup?.memberCount || group.memberCount || 0,
+            isPublic: group.isPublic,
+            requiresApproval: group.requiresApproval
+          } : null
+        };
+      } catch (error) {
+        console.error('Error checking Signal membership:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to check Signal membership'
+        });
+      }
+    }),
+
+  // Request to join a Signal group with automatic approval for authorized users
+  requestSignalGroupJoin: protectedProcedure
+    .input(z.object({
+      groupId: z.string(),
+      message: z.string().max(500).optional()
+    }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const userId = parseInt(ctx.session.user.id);
+        
+        // Check if user already has membership or pending request
+        const [existingMembership, existingRequest] = await Promise.all([
+          ctx.prisma.signalGroupMembership.findUnique({
+            where: {
+              userId_groupId: {
+                userId,
+                groupId: input.groupId
+              }
+            }
+          }),
+          ctx.prisma.signalGroupJoinRequest.findFirst({
+            where: {
+              userId,
+              groupId: input.groupId,
+              status: 'pending'
+            }
+          })
+        ]);
+
+        if (existingMembership?.status === 'active') {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'You are already a member of this group'
+          });
+        }
+
+        if (existingRequest) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'You already have a pending request for this group'
+          });
+        }
+
+        // Get group information
+        const group = await ctx.prisma.signalAvailableGroup.findUnique({
+          where: { groupId: input.groupId }
+        });
+
+        if (!group) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Group not found'
+          });
+        }
+
+        if (!group.isActive) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'This group is not currently accepting new members'
+          });
+        }
+
+        // Check if user is authorized (has existing group memberships = authorized)
+        const existingMemberships = await ctx.prisma.signalGroupMembership.findMany({
+          where: { 
+            userId,
+            status: 'active'
+          }
+        });
+
+        const isAuthorizedUser = existingMemberships.length > 0; // All current groups are authorized
+
+        if (isAuthorizedUser) {
+          // Auto-approve and add user directly to the group
+          const result = await ctx.prisma.$transaction(async (prisma) => {
+            // Create approved join request record
+            const joinRequest = await prisma.signalGroupJoinRequest.create({
+              data: {
+                userId,
+                groupId: input.groupId,
+                message: input.message,
+                status: 'approved',
+                processedAt: new Date()
+              }
+            });
+
+            // Create group membership
+            const membership = await prisma.signalGroupMembership.create({
+              data: {
+                userId,
+                groupId: input.groupId,
+                groupName: group.groupName,
+                status: 'active'
+              }
+            });
+
+            return { joinRequest, membership };
+          });
+
+          // Add user to actual Signal group via native bot
+          let signalJoinSuccess = false;
+          let signalError = null;
+          try {
+            const bot = getNativeBot();
+            const userPhone = ctx.session.user.attributes && typeof ctx.session.user.attributes === 'object'
+              ? (ctx.session.user.attributes as any).phone_number
+              : null;
+
+            if (userPhone) {
+              // Add user to Signal group
+              await bot.addUserToGroup(input.groupId, userPhone);
+              signalJoinSuccess = true;
+              console.log(`✅ Added user ${userPhone} to Signal group ${input.groupId}`);
+            } else {
+              signalError = 'No phone number found in user profile';
+              console.warn(`⚠️ Cannot add user to Signal group - no phone number`);
+            }
+          } catch (error) {
+            signalError = error instanceof Error ? error.message : 'Unknown Signal error';
+            console.error('❌ Failed to add user to Signal group:', error);
+          }
+
+          // Log admin event
+          await ctx.prisma.adminEvent.create({
+            data: {
+              eventType: 'signal_group_auto_join',
+              username: ctx.session.user.username || 'unknown',
+              details: `Auto-approved and joined ${group.groupName}${signalJoinSuccess ? '' : ` (Signal add failed: ${signalError})`}`,
+            },
+          });
+
+          return {
+            success: true,
+            autoApproved: true,
+            joined: signalJoinSuccess,
+            requestId: result.joinRequest.id,
+            membershipId: result.membership.id,
+            message: signalJoinSuccess 
+              ? `Successfully joined ${group.groupName}!` 
+              : `Approved for ${group.groupName}, but Signal group add failed. Contact admin.`,
+            signalError
+          };
+
+        } else {
+          // Create pending join request for manual approval
+          const joinRequest = await ctx.prisma.signalGroupJoinRequest.create({
+            data: {
+              userId,
+              groupId: input.groupId,
+              message: input.message,
+              status: 'pending'
+            }
+          });
+
+          return {
+            success: true,
+            autoApproved: false,
+            joined: false,
+            requestId: joinRequest.id,
+            message: group.requiresApproval 
+              ? 'Join request submitted for admin approval'
+              : 'Join request submitted'
+          };
+        }
+
+      } catch (error) {
+        console.error('Error requesting group join:', error);
+        if (error instanceof TRPCError) {
+          throw error;
+        }
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Failed to submit join request'
         });
       }
     }),
